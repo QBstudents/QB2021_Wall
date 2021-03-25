@@ -5,5 +5,5 @@ I am pat, I studied biochemistry in undergrad but I didn't like it. I am interes
 What I want from this course:
 1. Learn about methods used in the study of biodiversity
 1. Learn more aout concepts related to biodiversity
-1. Refresh my R skills
+1. Refresh my R skills (learn ggplot)
 
