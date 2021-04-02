@@ -39,9 +39,10 @@ In the R code chunk below, please provide the code to:
 rm(list = ls())
 getwd()
 setwd('~/Classwork/Current/QB/2.Worksheets/5.AlphaDiversity/')
-require(extrafont)
-my_font <- 'Comic Sans MS'
+require(extrafont) # linux problems
+my_font <- 'Arial'
 require(vegan)
+require(tidyverse)
 ```
 ## 2) LOADING DATA
 
@@ -51,7 +52,7 @@ In the R code chunk below, do the following:
 
 ```{r}
 data(BCI)
-str(BCI)
+str(BCI, max.level=0)
 ```
 
 ## 3) SPECIES RICHNESS
@@ -96,8 +97,7 @@ g_cov <- function(x) {
   1 - rowSums(x == 1) / rowSums(x)
 }
 coverages <- g_cov(BCI)
-print(paste('Range of Coverages: ', min(coverages), 'to', max(coverages)))
-
+print(coverages)
 ```
   
 ***Question 2***: Answer the following questions about coverage:
@@ -109,11 +109,11 @@ d.  Make some observations about coverage at the BCI plots.
 
 > ***Answer 2a***:  Good's coverage can produce numbers from 0 to 1 if each species if observed only as a singleton or no singletons are observed respectively.
 
-> ***Answer 2b***:  This would produce a Good's coverage of zero which would suggest that we've severely undersampled our sites.
+> ***Answer 2b***:  This would produce a Good's coverage of zero which would suggest that we've severely undersampled our sites. If each time we observed a new individual it belongs to a new species, we need to keep counting.
 
-> ***Answer 2c***:  
+> ***Answer 2c***:  About 7 % of species in site 1 are singletons.
 
-> ***Answer 2d***:  
+> ***Answer 2d***:  Coverages are in general good. In the site with the worst coverage 87% of species are represented by more than one individual.
 
 
 ### Estimated richness
@@ -131,12 +131,12 @@ In the R code chunk below, do the following:
 5. Calculate coverage of that site
 
 ```{r}
-
-
-
-
-
-
+mat <- read.table('data/soilbac.txt', header = TRUE, row.names = 1)
+sb <- tibble::as_tibble(t(mat))
+site1 <- sb[1,]
+s <- s_obs(site1)
+g <- g_cov(site1)
+print(paste('Site 1: S = ', s, '; G = ', g, '; N = ', sum(site1)))
 ```
 
 ***Question 3***: Answer the following questions about the soil bacterial dataset. 
@@ -145,11 +145,11 @@ a.  How many sequences did we recover from the sample `soilbac1`, i.e. *N*?
 b.  What is the observed richness of `soilbac1`? 
 c.  How does coverage compare between the BCI sample (`site1`) and the KBS sample (`soilbac1`)?
 
-> ***Answer 3a***:  
+> ***Answer 3a***: There was a total of 2119 individuals in this site
 
-> ***Answer 3b***: 
+> ***Answer 3b***: These individuals represented 1074 species
 
-> ***Answer 3c***:  
+> ***Answer 3c***: The civerage in the first site of the BCI sample was much higher (almost 30 percentage points) than in the soil sample.
 
 
 ### Richness estimators
@@ -165,20 +165,54 @@ In the R code chunk below, do the following:
 4. Use these functions to estimate richness at `site1` and `soilbac1`. 
 
 ```{r}
+s_chao1 <- function(df, site) {
+   x <- df[site,]
+   s_obs(x) + (sum(x == 1)^2) / (2 * sum(x == 2))
+}
 
+s_chao2 <- function(df, site) {
+   pa <- (df > 0) * 1
+   q1 <- sum(colSums(pa) == 1) # observed in one site
+   q2 <- sum(colSums(pa) == 1) # observed in two sites
+   s_obs(df[site,]) + (q1^2 / (2 * q2))
+}
 
+s_ace <- function(df, site, thresh = 10) {
+   df <- as.data.frame(df)
+   x <- df[site,]
+   x <- x[x>0]
+   s_abund <- sum(x > thresh) # not rare
+   s_rare <- sum(x < thresh)  # rare
+   singles <- sum(x == 1)     # singletons
+   n_rare <- sum(x[which(x <= thresh)])
+   c_ace <- 1 - (singles / s_rare) # coverage
+   i <- c(1:thresh)           # counters
+   
+   count <- function(i, y){
+      length(y[y == i])
+   }
+   
+   a1 <- sapply(i, count, x) # number of individuals in each class singleton, doubleton etc.?
+   f1 <- (i * (i - 1)) * a1 # not sure why we need this
+   
+   g_ace <- (s_rare / c_ace) * (sum(f1) / (n_rare * (n_rare - 1)))
+   s_abund + (s_rare / c_ace) + (singles / c_ace) * max(g_ace, 0)
+} 
+# first we'll look at the fisrt site in the BCI dataset
+sc1 <- s_chao1(BCI, 1)
+sc2 <- s_chao2(BCI, 1)
+sa <- s_ace(BCI, 1)
+print(paste('BCI; Chao1: ', sc1, '; Chao2: ', sc2, '; ACE: ', sa, sep=''))
 
-
-
-
-
-
+sc1 <- s_chao1(sb, 1)
+sc2 <- s_chao2(sb, 1)
+sa <- s_ace(sb, 1)
+print(paste('SoilBac; Chao1: ', sc1, '; Chao2: ', sc2, '; ACE: ', sa, sep=''))
 ```
 
 ***Question 4***: What is the difference between ACE and the Chao estimators? Do the estimators give consistent results? Which one would you choose to use and why?
 
-> ***Answer 4***:
-
+> ***Answer 4***: Each of these estimators compensates for potential bias in different ways by incorporating different information. They do not give consistent results at all, really. If I had prior information telling me that all of my sites ought to be very similar I would use Chao2, otherwise I would probably use ACE because it incorporates more information than Chao1.
 
 
 ### Rarefaction
@@ -197,12 +231,12 @@ In the R code chunk below, please do the following:
 
 
 ```{r}
-
-
-
-
-
-
+s_obs(sb)
+smallest_sample <- min(rowSums(sb))
+s_rarefy <- vegan::rarefy(sb, smallest_sample, se = TRUE)
+vegan::rarecurve(x = sb, step = 20, col = 'blue', cex = 0.6, las = 1, label=TRUE)
+abline(0, 1, col = 'red')
+text(1500, 1500, '1:1', pos = 2, col = 'red')
 ```
 
 
@@ -224,15 +258,12 @@ In the R code chunk below, do the following:
 4. Return the ranked vector
 
 ```{r}
-
-
-
-
-
-
-
+rank_abundance <- function(df, site) {
+   x <- df %>% slice(1)
+   x_nonzero <- x[x > 0]
+   x_ranked <- sort(x_nonzero, decreasing=TRUE)
+}
 ```
-
 Now, let's examine the RAC for `site1` of the BCI data set.
 
 In the R code chunk below, do the following:
@@ -242,17 +273,25 @@ In the R code chunk below, do the following:
 2. Label the x-axis "Rank in abundance" and the y-axis "log(abundance)"
 
 ```{r}
+require(scales)
+ranked <- rank_abundance(BCI, 1)
+ranks <- c(1:length(ranked))
+plot_rac <- tibble(rank = ranks, abundance = ranked)
 
-
-
-
-
-
+# make the plot
+g <- ggplot(plot_rac, aes(x = rank, y = abundance)) +
+   geom_point() +
+   scale_y_continuous(trans = 'log',
+                      breaks=scales::trans_breaks('log', function(x) exp(x)),
+                      labels=scales::trans_format('log', math_format(e^.x))) +
+   xlab('Rank in Abundance') +
+   ylab('log(Abundance)')
+g
 ```
 
 ***Question 5***: What effect does visualizing species abundance data on a log-scaled axis have on how we interpret evenness in the RAC?
 
-> ***Answer 5***:
+> ***Answer 5***: Log scales make it easier to see patterns in data with huge variation. In this case our data looks kind of linear and the slope of a best fit line tells us about evenness.
 
 
 Now that we have visualized unevennes, it is time to quantify it using Simpson's evenness ($E_{1/D}$) and Smith and Wilson's evenness index ($E_{var}$).
@@ -266,14 +305,14 @@ In the R code chunk below, do the following:
 2. Calculate $E_{1/D}$ for `site1`.
 
 ```{r}
+simpson <- function(df, site) {
+   x <- df[site,]
+   S <- s_obs(x)
+   D <- vegan::diversity(x, 'inv')
+   D / S
+}
 
-
-
-
-
-
-
-
+simpson(BCI, 1)
 ```
 
 ### Smith and Wilson's evenness index ($E_{var}$)
@@ -287,18 +326,18 @@ In the R code chunk below, please do the following:
 3. Compare $E_{1/D}$ and $E_{var}$.
 
 ```{r}
-
-
-
-
-
-
+smith_wilson <- function(df, site) {
+   x <- as_vector(df[site, ])
+   x_nonzero <- x[x>0]
+   1 - (2 / pi) * atan(var(log(x_nonzero)))
+}
+smith_wilson(BCI, 1)
 ```
 
 ***Question 6***: Compare estimates of evenness for `site1` of BCI using $E_{1/D}$ and $E_{var}$.
 Do they agree? If so, why? If not, why? What can you infer from the results.
 
-> ***Answer 6***:
+> ***Answer 6***: These values do not match but both report moderately even communities. Because of the bias in Simpson's measure, this might indicate that the most abundant species are less even than the community as a whole.
 
 
 ##5) INTEGRATING RICHNESS AND EVENNESS: DIVERSITY METRICS
@@ -316,15 +355,18 @@ In the R code chunk below, please do the following:
 2. Compare this estimate with the output of `vegan`'s diversity function using method = "shannon".
 
 ```{r}
-
-
-
-
-
-
-
-
-
+entropy <- function(df, site) {
+   H <- 0
+   for (n in df[site,]) {
+      if (n > 0) {
+         p <- n / sum(df[site,])
+         H <- H - p * log(p)
+      }
+   }
+   H
+}
+entropy(BCI, 1)
+vegan::diversity(BCI[1,])
 ```
 
 ### Simpson's diversity (or dominance)
@@ -338,19 +380,22 @@ In the R code chunk below, please do the following:
 2. Compare this estimate with the output of `vegan's` diversity function using method = "simp".
 
 ```{r}
+simpD <- function(df, site) {
+   D <- 0
+   N <- sum(df[site,])
+   for (n in df[site,]) {
+      D = D + (n / N)^2
+   }
+   D
+}
 
+d_sub <- 1 - simpD(sb, 1)
+d_inv <- 1 / simpD(sb, 1)
 
-
-
-
-
-
-
-
-
-
-
-
+d_sub
+vegan::diversity(sb[1,], index='simp')
+d_inv
+vegan::diversity(sb[1,], index='inv')
 ```
 
 ### Fisher's $\boldsymbol\alpha$
