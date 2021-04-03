@@ -39,10 +39,10 @@ In the R code chunk below, please provide the code to:
 rm(list = ls())
 getwd()
 setwd('~/Classwork/Current/QB/2.Worksheets/5.AlphaDiversity/')
-require(extrafont) # linux problems
-my_font <- 'Arial'
 require(vegan)
-require(tidyverse)
+require(dplyr)
+require(ggplot2)
+require(purrr)
 ```
 ## 2) LOADING DATA
 
@@ -283,7 +283,7 @@ g <- ggplot(plot_rac, aes(x = rank, y = abundance)) +
    geom_point() +
    scale_y_continuous(trans = 'log',
                       breaks=scales::trans_breaks('log', function(x) exp(x)),
-                      labels=scales::trans_format('log', math_format(e^.x))) +
+                      labels=scales::trans_format('log', math_format(.x))) +
    xlab('Rank in Abundance') +
    ylab('log(Abundance)')
 g
@@ -407,24 +407,14 @@ In the R code chunk below, please do the following:
 2. Calculate Fisher's $\boldsymbol\alpha$ for `site1` of BCI.
 
 ```{r}
-
-
-
-
-
-
-
-
-
-
-
-
-
+x_vec <- as_vector(BCI[1,])
+vegan::diversity(x_vec[x_vec > 0], 'inv')
+vegan::fisher.alpha(x_vec[x_vec > 0])
 ```
 
 ***Question 7***: How is Fisher's $\boldsymbol\alpha$ different from $E_{H'}$ and $E_{var}$? What does Fisher's $\boldsymbol\alpha$ take into account that $E_{H'}$ and $E_{var}$ do not?
 
-> ***Answer 7***:
+> ***Answer 7***: Fisher's $\boldsymbol\alpha$ takes into account a theoretical distribution. Specifically, $\boldsymbol\alpha$ is the coefficient in front of the terms of the logseries.
 
 ##6) MOVING BEYOND UNIVARIATE METRICS OF $\alpha$ DIVERSITY
 
@@ -448,11 +438,9 @@ In the R code chunk below, please do the following:
 3. Plot the results of the `radfit()` function using the code provided in the handout.
 
 ```{r}
-
-
-
-
-
+RAC <- vegan::radfit(x_vec)
+RAC
+plot(RAC, cex.lab = 1.4, cex.axis = 1.25)
 ```
 
 
@@ -460,22 +448,24 @@ In the R code chunk below, please do the following:
 a) Based on the output of `radfit()` and plotting above, discuss which model best fits our rank-abundance curve for `site1`?
 b) Can we make any inferences about the forces, processes, and/or mechanisms influencing the structure of our system, e.g., an ecological community?
 
-> ***Answer 8a***:  
-> ***Answer 8b***:
+> ***Answer 8a***: Mendelbrot fits best according to all three goodness-of-fit colunms.
+>
+> ***Answer 8b***: This one is not easy. In this context, we might see this distribution as a product of cumulative advantage or preferrential where some positive feedback allows high rank species to further increase in frequency. 
 
 
 ***Question 9***: Answer the following questions about the preemption model:
 a.  What does the preemption model assume about the relationship between total abundance (*N*) and total resources that can be preempted?
 b.  Why does the niche preemption model look like a straight line in the RAD plot?
 
-> ***Answer 10a***:  
-> ***Answer 10b***:
+> ***Answer 9a***: The preemption model assumes that the total abundance can be allocated to nonoverlapping niches whose size are proportional to the abundance allocated to them.
+>
+> ***Answer 9b***: When you take the logarithm of the expression you get $ln(a_r) = ln(N) + ln(\alpha) + (r - 1)ln(1-\alpha)$ which is linear in $r$.
 
 
 
 ***Question 10***: Why is it important to account for the number of parameters a model uses when judging how well it explains a given set of data?
 
-> ***Answer 11***:
+> ***Answer 10***: With a parameter for every daya point we could perfectly fit our data with a completely useless model that tells us nothing that we dont already know. In order for this kind of a model to be useful it needs to generalize which we only get if we don't overfit our model.
 
 
 ## SYNTHESIS
@@ -483,10 +473,27 @@ b.  Why does the niche preemption model look like a straight line in the RAD plo
 1.  As stated by Magurran (2004) the  ${D = } \sum p_i^2$ derivation of Simpson's Diversity only applies to communities of infinite size. For anything but an infinitely large community, Simpson's Diversity index is calculated as ${D = } \sum \frac{n_i(n_i -1)} {N(N-1)}$. 
 Assuming a finite community, calculate Simpson's D, 1 - D, and Simpson's inverse (i.e. 1/D) for `site 1` of the BCI site-by-species matrix. 
 
+```{r}
+simpsons_D <- function(x) {
+   N <- sum(x)
+   sum((x * (x - 1)) / (N * (N - 1)))
+}
+print(paste("Simpson's D:", simpsons_D(BCI[1,])))
+print(paste("1 - D:", 1 - simpsons_D(BCI[1,])))
+print(paste("1 / D:", 1 / simpsons_D(BCI[1,])))
+```
+
 2.  Along with the rank-abundance curve (RAC), another way to visualize the distribution of abundance among species is with a histogram (a.k.a., frequency distribution) that shows the frequency of different abundance classes.
 For example, in a given sample, there may be 10 species represented by a single individual, 8 species with two individuals, 4 species with three individuals, and so on.
 In fact, the rank-abundance curve and the frequency distribution are the two most common ways to visualize the species-abundance distribution (SAD) and to test species abundance models and biodiversity theories.
 To address this homework question, use the R function **hist()** to plot the frequency distribution for `site 1` of the BCI site-by-species matrix, and describe the general pattern you see.
+
+```{r}
+site1 <- as_vector(BCI[1,])
+site1_nonzero <- site1[site1 > 0]
+hist(site1_nonzero)
+```
+> The histogram is qualitatively similar to the RAC abundance curve in its shape. In both we see a sharp drop-off and a substantial tail. Despite the different view this gives us on our community, both tell us that most species are rare and a small number are common.
 
 3.  We asked you to find a biodiversity dataset with your partner.
 This data could be one of your own or it could be something that you obtained from the literature. 
@@ -494,6 +501,26 @@ Load that dataset.
 How many sites are there?
 How many species are there in the entire site-by-species matrix?
 Any other interesting observations based on what you learned this week?
+
+```{r}
+require(readxl)
+require(dplyr)
+df <- readxl::read_excel('~/Classwork/Current/QB/Project/species.xlsx')
+str(df)
+df_long <- df %>%
+  tidyr::pivot_longer(Bed_1L:Bed_m, names_to = 'time', values_to = 'pres', names_transform = list())
+time_series <- df_long %>%
+  group_by(time) %>%
+  summarize(time_sums = sum(pres))
+time_series
+g <- ggplot(time_series, aes(x = time, y = time_sums, group=1)) +
+  geom_point() +
+  stat_smooth(formula = 'y ~ x', method = 'lm') +
+  xlab('Layer [proxy for time]') +
+  ylab('S')
+g
+```
+> Our dataset contains presence absence informaiton for animals in the fossil record at the same site through time. There are 178 species observed at least once, and as the figure shows, species richness tends to decrease in time.
 
 ## SUBMITTING YOUR ASSIGNMENT
 Use Knitr to create a PDF of your completed 5.AlphaDiversity_Worksheet.Rmd document, push it to GitHub, and create a pull request.
