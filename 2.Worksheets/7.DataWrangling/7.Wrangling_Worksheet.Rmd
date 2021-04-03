@@ -20,7 +20,7 @@ We will learn about these tools while also gaining exposure to R packages that a
 ```{r, results = 'hide'}
 rm(list=ls()) 
 getwd() 
-setwd("~/GitHub/QB-2021/1.Handouts/7.ControlStructures")
+setwd("~/Classwork/Current/QB/2.Worksheets/7.DataWrangling")
 ```
 
 ## 2) SIMULATE BIODIVERSITY 
