@@ -85,7 +85,7 @@ row.names(comm_mat1$xy_dat) <- quads
 row.names(comm_mat1$spec_dat) <- quads
 
 # Examine the species x quadrat matrix 
-# print(comm_mat1$spec_dat)
+print(comm_mat1$spec_dat)
 ```
 
 Let's quickly take a look at the rank-abundance curve (RAC) of our plant community using the `rad` function from the `vegan` package. 
@@ -241,15 +241,82 @@ But the SAR is also influenced by biological phenomena including dispersal limit
 Feel free to choose different values for the the function's arguments. 
 Create an SAR plot and calculate the corresponding *z*-value. 
 
+```{r}
+options(warn=-1)
+# simulate big old community
+my_comm <- sim_poisson_community(s_pool=200, n_sim=10000, sad_type = "lnorm", 
+      sad_coef = list("meanlog" = 2, "sdlog" = 2))
+
+# sample from the community with quadrats at different area sizes
+quad_areas <-  seq(0.005, 0.5, 0.005)
+dfs <- vector("list", length(quad_areas))
+for (qa in 1:length(quad_areas)) {
+  samps <- sample_quadrats(my_comm, 5, quadrat_area = quad_areas[qa], plot = FALSE, avoid_overlap=F)
+  samp_df <- samps$spec_dat %>%
+    mutate(richness = rowSums(. > 0)) %>%
+    mutate(area = quad_areas[qa]) %>%
+    select(area, richness)
+  dfs[[qa]] <- samp_df
+}
+all_samps_nonzero <- bind_rows(dfs) %>%
+  filter(richness > 0) %>%
+  mutate(ln_richness = log(richness)) %>%
+  mutate(ln_area = log(area))
+SA_plot <- ggplot(all_samps_nonzero, aes(x = ln_area, y = ln_richness)) +
+  geom_point() +
+  stat_smooth(method='lm')
+SA_plot
+linreg <- lm(ln_richness ~ ln_area, all_samps_nonzero)
+print('slope of regression line:')
+print(linreg$coefficients[['ln_area']])
+```
+
 2. The `sim_poisson_community`function simulates species that have a random spatial distribution.
 However, in nature, this is rarely the case. 
 Species often have patchy distributions, which can be simulated in `mobsim` using the the `sim_thomas_community` function.
 Include a plot of the patchy distribution using examples above.
 Then, create another SAR plot from the patchy community and compare its *z*-values to that of the random distribution. 
 
+```{r}
+options(warn=-1)
+# simulate big old community
+my_comm <- sim_thomas_community(s_pool=200, n_sim=10000, sad_type = "lnorm",
+        sad_coef = list("meanlog" = 2, "sdlog" = 2))
+plottable_comm <- sim_thomas_community(s_pool=20, n_sim=1000)
+plot(plottable_comm)
+
+# sample from the community with quadrats at different area sizes
+quad_areas <-  seq(0.005, 0.5, 0.005)
+dfs <- vector("list", length(quad_areas))
+for (qa in 1:length(quad_areas)) {
+  samps <- sample_quadrats(my_comm, 5, quadrat_area = quad_areas[qa], plot = FALSE, avoid_overlap=F)
+  samp_df <- samps$spec_dat %>%
+    mutate(richness = rowSums(. > 1)) %>%
+    mutate(area = quad_areas[qa]) %>%
+    select(area, richness)
+  dfs[[qa]] <- samp_df
+}
+all_samps_nonzero <- bind_rows(dfs) %>%
+  filter(richness > 0) %>%
+  mutate(ln_richness = log10(richness)) %>%
+  mutate(ln_area = log10(area))
+SA_plot <- ggplot(all_samps_nonzero, aes(x = ln_area, y = ln_richness)) +
+  geom_point() +
+  stat_smooth(method='lm')
+SA_plot
+linreg <- lm(ln_richness ~ ln_area, all_samps_nonzero)
+print('slope of regression line:')
+print(linreg$coefficients[['ln_area']])
+```
 3. Explain the SAR patterns from your simulations along with any observed differences based on how we have simulated the communities.
 Are there any features that you might include with a more elaborate simulation? 
 Describe. 
+
+> For the poisson community, we are fitting a line to something that doesn't really look like a line. This means that the power law form of our species area relationship does not hold for this kind of spatially homogenous community. No matter where we sample we would expect to see the same abundances of species as area is increased. This will be completely dictated by the rank abundance distribution. We end up with something with an upper asympytote.
+>
+> When we use the clumpy spatial simulation, we see a more linear curve although it is still saturating. This probably reflects the fact that different locations are not perfect statistical samples of the entire space because they are likely to be enriched for particular species. This is more realistic than the spatially homogenous simulation above. The improved linear fit suggests that the power law form is more appropriate in this case.
+> 
+> In both cases, our $z$ values are quite high. The slope of the curve is dependent on the species abundance distribution used to generate the community and the associated parameters. In order to improve realism we could use empirical SAD estimates in generating our communities. We could also consider larger scale spatial structure such as correlations between clumps of species that might indicate community structure within a larger metacommunity.
 
 ## SUBMITTING YOUR ASSIGNMENT
 Use Knitr to create a PDF of your completed 7.Wrangling_Worksheet.Rmd document, push it to GitHub, and create a pull request.
