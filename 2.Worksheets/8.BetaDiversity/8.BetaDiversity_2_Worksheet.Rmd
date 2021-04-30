@@ -42,10 +42,10 @@ In the R code chunk below, provide the code to:
 4. load the `vegan` R package (be sure to install if needed).  
 
 ```{r}
-
-
-
-
+rm(list = ls())
+getwd()
+setwd('~/Classwork/Current/QB/2.Worksheets/8.BetaDiversity/')
+require(vegan)
 ```
 
 ## 2) LOADING DATA
@@ -54,9 +54,8 @@ In the R code chunk below, load the `doubs` dataset from the `ade4` package
 
 ```{r}
 # note, pleae do not print the dataset when submitting
-
-
-
+require(ade4)
+data(doubs)
 ```
 ## 3) HYPOTHESIS TESTING
 
@@ -69,21 +68,31 @@ In the code chunk below, test the hypothesis that fish community composition var
 2. use the multivariate analyses for categorical predictors to describe how fish community structure relates to habitat quality.
 
 ```{r}
+require(tidyr)
+require(dplyr)
+fish <- doubs[['fish']][-8,]
+quality_vec <- c(rep('high', 13), rep('med', 5), rep('low', 6), rep('med', 5))
+print(length(quality_vec) == nrow(fish))
 
+res <- adonis(fish ~ quality_vec)
+print(res)
+```
 
+```{r}
+indval <- indicspecies::multipatt(fish, cluster = quality_vec, func = "IndVal.g", control = how(nperm = 999))
+summary(indval)
+```
 
-
-
-
-
-
-
+```{r}
+fish_rel <- vegan::decostand(fish, method = "total")
+phi <- indicspecies::multipatt(fish_rel, cluster = quality_vec, func = "r.g", control = how(nperm=999))
+summary(phi)
 ```
 
 ***Question 1***: Based on the PERMANOVA, IndVal, and phi coefficient analyses, what did you learn about the relationship between habitat quality and the fish species composition?
 Are the different analyses consistent with one another and do they agree with the visualizations (heat maps, cluster dendograms, ordinations) that you created?
 
-> ***Answer 1***: 
+> ***Answer 1***: These approaches do agree and they agree with the visualizations from the last worksheet. PERMANOVA identifies that the categorical predictors are significant and these roughly correspond to the 4 main groups that were aparent in the dendrogram and ordination. Previously I identified Satr and Alal as potential quality markers, based on their positions in the ordination. Both indicator value methods identify these species as significant predictors or correlates. Interestingly according to the above statistics these may not be the best predictors despoite their extreme values on the ordination.
 
 
 ### B.  Multivariate Procedures for Continuous Designs
@@ -95,17 +104,15 @@ In the R code chunk below, do the following:
 2. use a Mantel test to test the hypothesis that fish assemblages are correlated with stream environmental variables.
 
 ```{r}
-
-
-
-
-
+fish_bc <- vegan::vegdist(doubs$fish[-8,], method = "bray")
+env_euc <- vegan::vegdist(doubs$env[-8, ], method = "euclid")
+mantel(fish_bc, env_euc)
 ```
 
 ***Question 2***: What do the results from our Mantel test suggest about fish diversity and stream environmental conditions? 
 How does this relate to your hypothesis about stream quality influencing fish communities?
 
-> ***Answer 2***:  
+> ***Answer 2***: This shows us that fish community composition does correlate with environment type as we thought.
 
 ### ii.  Constrained Ordination
 In the R code chunk below, do the following:  
@@ -118,30 +125,56 @@ In the R code chunk below, do the following:
 6. plot the constrained ordination results including labeled points for each site, and
 7. add vectors that demonstrate the influence of each environmental factor the constrained ordination.   
 ```{r}
+require(ggplot2)
+# define environmental matrix 
+env_chem <- as.matrix(doubs$env[-8, 5:11])
 
+# model selection
+# no vars
+doubs_dbrda_none <- vegan::dbrda(fish_bc ~ 1, as.data.frame(env_chem))
+# all vars
+doubs_dbrda_full <- vegan::dbrda(fish_bc ~ ., as.data.frame(env_chem))
+# test fits
+doubs_dbrda <- vegan::ordiR2step(doubs_dbrda_none, doubs_dbrda_full, perm_max = 200)
 
+## check it out!
+# doubs_dbrda$call
+# doubs_dbrda$anova
+vegan::ordiplot(doubs_dbrda)
+# looks like oxygen (oxy), dissolved nitrate (nit), and the oxygen demand (bdo)
+# are the useful uncorrelated environmental features
 
+# permutest(doubs_dbrda, permutations = 999)
+# envfit(doubs_dbrda, env_chem[,c(4,6,7)], perm = 999)
 
+# Let's make a fancy plot
+expvar <- round(sapply(doubs_dbrda$CCA$eig, function(x) x /
+                       sum(c(doubs_dbrda$CCA$eig, doubs_dbrda$CA$eig))), 3) * 100
 
+# convert the plots to a dataframe
+dbrda_tib <- tibble::as_tibble(scores(doubs_dbrda)$sites) %>%
+  mutate(name = c(1:7, 9:(nrow(scores(doubs_dbrda)$sites) + 1)))
+# env data
+env_vecs <- tibble::as_tibble(scores(doubs_dbrda, display = "bp"))
+env_vecs <- mutate(env_vecs, name = c('Oxygen', 'Demand', 'Nitrate'))
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+print(env_vecs)
+g <- ggplot() +
+  geom_hline(yintercept=0, linetype=2) +
+  geom_vline(xintercept = 0, linetype=2) +
+  geom_point(data=dbrda_tib, aes(x = dbRDA1, y = dbRDA2), size = 4, alpha = 0.8, color = 'grey') +
+  geom_text(data=dbrda_tib, aes(x=dbRDA1, y = dbRDA2, label = name))+
+  geom_segment(data=env_vecs, aes(x = 0, y = 0, xend = dbRDA1, yend = dbRDA2), arrow = arrow(), alpha = 0.3) +
+  geom_text(data=env_vecs, aes(x = dbRDA1, y = dbRDA2 + 0.2, label = name)) +
+  xlab(paste('dbRDA1 (', expvar[1], '%)', sep = '')) +
+  ylab(paste('dbRDA2 (', expvar[2], '%)', sep = '')) +
+  ggthemes::theme_pander()
+g
 ```
 
 ***Question 3***: Based on the constrained ordination, what are the environmental variables (or groups of correlated variables) that seem to be contributing to variation in fish community structure?
 
-> ***Answer 3***: 
+> ***Answer 3***: We see dissolved oxygen concentration, dissolved nitrate concentration, and the oxygen demand of river life are the significant relationships.
 
 ### iii. Variation Partitioning
 In the code chunk below,   
@@ -153,18 +186,47 @@ In the code chunk below,
 5. Partition the variation among sites into the relative importance of space, environment, spatially structured environment, and residuals,
 6. Plot the variation partitioning output to visualize it.  
 ```{r}
+# environmental matrix
+env_mod <- model.matrix(~ oxy + bdo + nit, as.data.frame(env_chem))[, -1]
 
+# get space decomposition
+rs <- rowSums(fish) / sum(fish)
+doubs_pcnmw <- vegan::pcnm(dist(doubs$xy[-8,]), w = rs, dist.ret = TRUE)
+doubs_space <- as.data.frame(scores(doubs_pcnmw))
+doubs_pcnm_none <- dbrda(fish_bc ~ 1, doubs_space)
+doubs_pcnm_full <- dbrda(fish_bc ~ ., doubs_space)
+step_pcnm <- vegan::ordiR2step(doubs_pcnm_none, doubs_pcnm_full, perm.max = 200)
 
+space_mod <- model.matrix(~ PCNM2 + PCNM3 + PCNM5 + PCNM1 + PCNM13 + 
+                            PCNM16 + PCNM6, doubs_space)[,-1]
 
+# build the full models
+doubs_total_env <- vegan::dbrda(fish_bc ~ env_mod)
+doubs_total_space <- vegan::dbrda(fish_bc ~ space_mod)
 
+doubs_env_cond_space <- vegan::dbrda(fish_bc ~ env_mod + Condition(space_mod))
+doubs_space_cond_env <- vegan::dbrda(fish_bc ~ space_mod + Condition(env_mod))
 
+## test for significance
+# vegan::permutest(doubs_total_env)
+# vegan::permutest(doubs_total_space)
+# vegan::permutest(doubs_env_cond_space)
+# vegan::permutest(doubs_space_cond_env)
 
+# using the built-in varpart() function
+doubs_varpart <- vegan::varpart(fish_bc, env_mod, space_mod)
+doubs_varpart
 
+par(mar = c(2, 2, 2, 2))
+plot(doubs_varpart)
+text(1, 0.25, "Space")
+text(0, 0.25, "Env")
+mtext("Variation Partitioning of\nDoubs Fish Diversity")
 ```
 
 ***Question 4***: Interpret the variation partitioning results.   
 
-> ***Answer 4***: 
+> ***Answer 4***: The environment and spatial considerations separately and together explain most of the variation except for a remaining unexplained fraction in the residuals. Space alone is more informative than the environment alone.
 
 ## SYNTHESIS
 
@@ -173,9 +235,114 @@ Take ten (10) subsamples from each site using the quadrat function and answer th
 
 1) Perform a PERMANOVA to test whether or not the spatial distribution of species affects species composition.
 
+```{r}
+# poisson community
+pois_comm <- mobsim::sim_poisson_community(25, 1000)
+pois_quad <- mobsim::sample_quadrats(pois_comm, 10)
+
+# thomas community
+thom_comm <- mobsim::sim_thomas_community(25, 1000)
+thom_quad <- mobsim::sample_quadrats(thom_comm, 10)
+
+# factor vector
+sources <- c(rep("poisson", 10), rep("thomas", 10))
+
+# full SbyS
+all_sites <- bind_rows(pois_quad$spec_dat, thom_quad$spec_dat)
+
+res <- vegan::adonis(all_sites ~ sources)
+print(res)
+```
+
+>  There is a significant relationship between source type and species composition!
+
+
 2) Load the dataset you are using for your Team Project. 
 Perform an ordination to visualize your dataset.
 Using this ordination, develop some hypotheses relevant to $\beta$-diversity.
 Use a statistic to test one of these hypotheses.
 Succinctly explain the finding and its relevance to your system.
 
+```{r}
+require(readr)
+require(dplyr)
+require(tidyr)
+require(vegan)
+require(purrr)
+require(ggplot2)
+
+# abundance data
+df <- read_csv('~/projects/QB-2021-project/data/taxapercent.csv')
+taxa <- df %>%
+  mutate(layer = X1) %>%
+  select(-"pop%", -X1)
+names(taxa)
+labels <- as_vector(taxa['layer'])
+
+abundance_bc <- vegan::vegdist(taxa[, 1:(ncol(taxa)-1)])
+
+# define environmental matrix
+environ <- read_csv("~/projects/QB-2021-project/data/totalenv.csv")
+times <- read_csv("~/projects/QB-2021-project/data/unitages.csv")
+
+# lower bed1
+window_size = 0.4
+df_list <- vector("list", 10)
+for (i in 1:11) {
+  row <- environ %>%
+  filter(age_ma > times$age_ma[i] & age_ma < times$age_ma[i] + window_size) %>%
+  mutate(layer = labels[i]) %>%
+  summarize(layer = layer, mean_c13 = mean(carb_c13), sd_c13 = sd(carb_c13),
+            mean_o18 = mean(carb_o18), sd_o18 =  sd(carb_o18))
+  df_list[[i]] <- row[1,]
+}
+env <- bind_rows(df_list)
+# model selection
+# no vars
+taxa_dbrda_none <- vegan::dbrda(abundance_bc ~ 1, env[,2:ncol(env)])
+# all vars
+taxa_dbrda_full <- vegan::dbrda(abundance_bc ~ ., env[,2:ncol(env)])
+# test fits
+taxa_dbrda <- vegan::ordiR2step(taxa_dbrda_none, taxa_dbrda_full, perm_max = 200)
+
+## check it out!
+# taxa_dbrda$call
+# taxa_dbrda$anova
+
+# nmone of the env vectors matter but lets plot the whole thing anyway
+vegan::ordiplot(taxa_dbrda_full)
+
+# Let's make a fancy plot
+expvar <- round(sapply(taxa_dbrda$CA$eig, function(x) x /
+                       sum(c(taxa_dbrda$CA$eig))), 3) * 100
+
+# convert the plots to a dataframe
+dbrda_tib <- tibble::as_tibble(scores(taxa_dbrda)) %>% mutate(layer = labels)
+
+env_vecs <- tibble::as_tibble(scores(taxa_dbrda, display = "bp"))
+env_vecs <- mutate(env_vecs, name = "vec") # c('Oxygen', 'Demand', 'Nitrate'))
+
+print(env_vecs)
+g <- ggplot() +
+  geom_hline(yintercept=0, linetype=2) +
+  geom_vline(xintercept = 0, linetype=2) +
+  geom_point(data=dbrda_tib, aes(x = MDS1, y = MDS2), size = 3, alpha = 0.8, color = 'grey') +
+  geom_text(data=dbrda_tib, aes(x = MDS1, y = MDS2, label = layer)) +
+  #geom_segment(data=env_vecs, aes(x = 0, y = 0, xend = dbRDA1, yend = dbRDA2), arrow = arrow(), alpha = 0.3) +
+  #geom_text(data=env_vecs, aes(x = dbRDA1, y = dbRDA2 + 0.2, label = name)) +
+  xlab(paste('MDS1 (', expvar[1], '%)', sep = '')) +
+  ylab(paste('MDS2 (', expvar[2], '%)', sep = '')) +
+  theme_bw()
+g
+```
+
+>  So none of the environmental vectors matter according to R2. The fancy ggplot shows PCoA, while the `vegan`-generated `ordiplot` shows the full model. Just to double check let's see if PERMANOVA finds a relationship between the mean isotope values and the species composition.
+
+```{r}
+mean_carbon <- as_vector(env[,'mean_c13'])
+mean_oxygen <- as_vector(env[,'mean_o18'])
+print(adonis(taxa[, 1:(ncol(taxa)-1)] ~ mean_oxygen), method = 'bray', permutations=999)
+print(adonis(taxa[, 1:(ncol(taxa)-1)] ~ mean_carbon), method = 'bray', permutations=999)
+```
+
+>  The PERMANOVA shows us that there is a significant relationship between Carbon-13 and species composition but oxygen seems to play no role.

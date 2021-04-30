@@ -48,8 +48,7 @@ In the R code chunk below, provide the code to:
 ```{r}
 rm(list = ls())
 getwd()
-setwd("~/GitHub/QB-2019/2.Worksheets/11.PhyloTraits")
-
+setwd("~/Classwork/Current/QB/2.Worksheets/11.PhyloTraits")
 ```
 
 ## 2) DESCRIPTION OF DATA
@@ -63,7 +62,7 @@ In this exercise, we will take a phylogenetic approach to mapping phosphorus res
 ***Question 1***: Using your favorite text editor, compare the `p.isolates.fasta` file and the `p.isolates.afa` file. 
 Describe the differences that you observe between the two files. 
 
-> ***Answer 1***: 
+> ***Answer 1***: The `.afa` file is aligned meaning that homologous sequence regions have been placed into the same position along the sequence through the addition of gaps.
 
 In the R code chunk below, do the following:
 1. read your alignment file,
@@ -72,14 +71,18 @@ In the R code chunk below, do the following:
 4. plot the alignment using a grid to visualize rows of sequences.
 
 ```{r}
-package.list <- c('ape', 'seqinr', 'phylobase', 'adephylo', 'geiger', 'picante', 'stats', 'RColorBrewer', 'caper', 'phylolm', 'pmc', 'ggplot2', 'tidyr', 'dplyr', 'phangorn', 'pander') 
+package.list <- c('ape', 'seqinr', 'phylobase', 'geiger', 'picante', 'stats', 'RColorBrewer', 'caper', 'phylolm', 'pmc', 'ggplot2', 'tidyr', 'dplyr', 'phangorn', 'pander') 
 for (package in package.list) {
   if (!require(package, character.only=TRUE, quietly=TRUE)) {
     install.packages(package)
     library(package, character.only=TRUE)
   }
 }
-
+# read alignment and convert/viz
+read_aln <- read.alignment(file = "./data/p.isolates.afa", format = 'fasta')
+p.DNAbin <- as.DNAbin(read_aln)
+window <- p.DNAbin[,500:650]
+image.DNAbin(window, cex.lab = 0.50)
 ```
 
 ***Question 2***:  Make some observations about the `muscle` alignment of the 16S rRNA gene sequences for our bacterial isolates and the outgroup, *Methanosarcina*, a member of the domain Archaea. 
@@ -88,8 +91,8 @@ Move along the alignment by changing the values in the `window` object.
 a. Approximately how long are our sequence reads?  
 b. What regions do you think would are appropriate for phylogenetic inference and why?  
 
-> ***Answer 2a***:   
-> ***Answer 2b***:  
+> ***Answer 2a***: the majority of the sequence reads are about 700-900 base pairs. The outgroup is much longer and some are much shorter.
+> ***Answer 2b***: I would think we would want to use regions without large sections missing for any taxa so maybe 500-650 would be a good choice although it is short.
 
 ## 4) MAKING A PHYLOGENETIC TREE
 
@@ -105,14 +108,21 @@ In the R code chunk below, do the following:
 4. plot the rooted tree. 
 
 ```{r}
+p.DNAbin <- p.DNAbin[, 500:650] # to enable comparison with ML tree
+seq_dist_raw <- dist.dna(p.DNAbin, model = "raw", pairwise.deletion = FALSE)
+nj_tree <- bionj(seq_dist_raw)
+outgroup <- match("Methanosarcina", nj_tree$tip.label)
+nj_rooted <- root(nj_tree, outgroup, resolve.root = TRUE)
 
-
+par(mar = c(1,1,2,1) + 0.1)
+plot.phylo(nj_rooted, main = "Neighbor Joining Tree", "phylogram", use.edge.length = FALSE, direction = "right", cex = 0.6, label.offset = 1)
+add.scale.bar(cex = 0.7)
 ```
 
 ***Question 3***: What are the advantages and disadvantages of making a neighbor joining tree?   
 
 
-> ***Answer 3***:  
+> ***Answer 3***:  Its easy and fast! But also its not the most accurate method.
  
 
 
@@ -125,7 +135,36 @@ In the R code chunk below, do the following:
 4. create a cophylogenetic plot to compare the topologies of the trees.
 
 ```{r}
+# fancy substitution model
+seq_dist_F84 <- dist.dna(p.DNAbin, model = "F84", pairwise.deletion = FALSE)
 
+# Plot against raw distance
+par(mar = c(5,5,2,1) + 0.1)
+plot(seq_dist_raw, seq_dist_F84, pch = 20, col = "red", las = 1, asp = 1, xlim = c(0, 0.7), ylim = c(0, 0.7),
+     xlab = "Raw Distance", ylab = "F84 Distance")
+abline(b = 1, a = 0, lty = 2)
+text(0.65, 0.6, "1:1")
+
+# now we'll make the new trees
+raw_tree <- bionj(seq_dist_raw)
+F84_tree <- bionj(seq_dist_F84)
+
+# Define outgroup
+raw_outgroup <- match("Methanosarcina", raw_tree$tip.label)
+F84_outgroup <- match("Methanosarcina", F84_tree$tip.label)
+
+# root the trees
+raw_rooted <- root(raw_tree, raw_outgroup, resolve_root = TRUE)
+F84_rooted <- root(F84_tree, F84_outgroup, resolve_root = TRUE)
+
+# make the two tree plot
+layout(matrix(c(1,2), 1, 2), width = c(1, 1))
+par(mar = c(1,1,2,0))
+plot.phylo(raw_rooted, type = "phylogram", direction = "right", show.tip.label = TRUE,
+           use.edge.length = FALSE, adj = 0.5, cex = 0.6, label.offset = 2, main = "Raw")
+par(mar = c(1,0,2,1))
+plot.phylo(F84_rooted, type = "phylogram", direction = "left", show.tip.label = TRUE,
+           use.edge.length = FALSE, adj = 0.5, cex = 0.6, label.offset = 2, main = "F84")
 
 ```
 
@@ -137,7 +176,37 @@ In the R code chunk below, do the following:
 5. be sure to format, add appropriate labels, and customize each plot.
 
 ```{r}
+# fancy substitution model
+seq_dist_F84 <- dist.dna(p.DNAbin, model = "F84", pairwise.deletion = FALSE)
+seq_dist_t92 <- dist.dna(p.DNAbin, model = "T92", pairwise.deletion = FALSE)
 
+# Plot against raw distance
+par(mar = c(5,5,2,1) + 0.1)
+plot(seq_dist_t92, seq_dist_F84, pch = 20, col = "red", las = 1, asp = 1, xlim = c(0, 0.7), ylim = c(0, 0.7),
+     xlab = "Raw Distance", ylab = "F84 Distance")
+abline(b = 1, a = 0, lty = 2)
+text(0.65, 0.6, "1:1")
+
+# now we'll make the new trees
+t92_tree <- bionj(seq_dist_t92)
+F84_tree <- bionj(seq_dist_F84)
+
+# Define outgroup
+t92_outgroup <- match("Methanosarcina", t92_tree$tip.label)
+F84_outgroup <- match("Methanosarcina", F84_tree$tip.label)
+
+# root the trees
+t92_rooted <- root(t92_tree, t92_outgroup, resolve_root = TRUE)
+F84_rooted <- root(F84_tree, F84_outgroup, resolve_root = TRUE)
+
+# make the two tree plot
+layout(matrix(c(1,2), 1, 2), width = c(1, 1))
+par(mar = c(1,1,2,0))
+plot.phylo(t92_rooted, type = "phylogram", direction = "right", show.tip.label = TRUE,
+           use.edge.length = FALSE, adj = 0.5, cex = 0.6, label.offset = 2, main = "T92")
+par(mar = c(1,0,2,1))
+plot.phylo(F84_rooted, type = "phylogram", direction = "left", show.tip.label = TRUE,
+           use.edge.length = FALSE, adj = 0.5, cex = 0.6, label.offset = 2, main = "F84")
 
 ```
 
@@ -159,8 +228,19 @@ In the R code chunk below, do the following:
 2. Plot bootstrap support values onto the tree
 
 ```{r}
+p_dnabin_phydat <- read.phyDat("./data/p.isolates.afa", format="fasta", type="DNA")
+print(p_dnabin_phydat[, 500:650])
 
+fit <- pml(nj_rooted, data=p_dnabin_phydat[, 500:650])
+fitJC <- optim.pml(fit, TRUE)
+fitGTR <- optim.pml(fit, model="GTR", optInv=TRUE, optGAMMA=TRUE, rearrangement = 'NNI', control=pml.control(trace = 0))
 
+anova(fitJC, fitGTR)
+AIC(fitJC)
+AIC(fitGTR)
+
+bs <- bootstrap.pml(fitJC, bs=10, optNni=TRUE, control = pml.control(trace = 0))
+print(bs)
 ```
 
 ***Question 5***:  
