@@ -1,0 +1,156 @@
+---
+title: "$\beta$ Diversity Plots"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+# Pure $\beta$ Diversity
+
+```{r}
+require(tidyr)
+require(dplyr)
+require(ggplot2)
+
+setwd("~/projects/QB-2021-project/")
+```
+
+# Sørensen Distance (species level)
+
+### Heatmap of resemblance
+
+```{r}
+library(viridis)
+# load the presence absence species level data
+lbs <- readr::read_csv("~/projects/QB-2021-project/data/layer_by_species.csv")
+layers <-  lbs[,1]
+pres_abs <- lbs[,2:ncol(lbs)]
+print(pres_abs)
+
+lbs_sor <- vegan::vegdist(pres_abs, method = "bray", binary = TRUE)
+print(11:1)
+lattice::levelplot(as.matrix(lbs_sor)[,11:1], aspect = "iso", 
+                   col.regions = inferno, xlab = "Layer", ylab = "Layer",
+                   main = "Sørensen")
+```
+### Time series
+
+The Other thing we can do with the presence absence matrix is produce that time series thing of species richness with the trend and jaccard distances included as well.
+
+```{r}
+# modified from https://jootse84.github.io/notes/jaccard-index-calculation-in-R#:~:text=The%20Jaccard%20Index%20is%20a,the%20length%20of%20its%20union
+
+calculate_jaccard_rows <- function(df, row1, row2) {
+  pa_mat <- df %>%
+    select(-age_ma, -layer) %>%
+    as.matrix()
+  
+  sums <- colSums(pa_mat[c(row1, row2),])
+  
+  inters <- length(sums[sums == 2])
+  row1_s <- sum(pa_mat[row1,])
+  row2_s <- sum(pa_mat[row2,])
+  uni <- length(sums[sums > 0])
+  
+  # uni <- row1_s + row2_s - inters
+  
+  return(inters/uni)
+}
+
+j_vals <- c(NULL)
+for (i in 1:(nrow(lbs) - 1)) {
+  j_vals <- c(j_vals, calculate_jaccard_rows(lbs, i, i+1))
+}
+
+rich_series <- lbs %>%
+  mutate(richness = rowSums(select(., -layer, -age_ma))) %>%
+  mutate(age = age_ma) %>%
+  mutate(measure = "richness") %>%
+  mutate(value = richness) %>%
+  select(age, measure, value)
+
+jaccard_df <- lbs %>%
+  mutate(age = age_ma) %>%
+  mutate(value = c(mean(j_vals), j_vals)) %>%
+  mutate(measure = "jaccard") %>%
+  select(age, measure, value)
+  
+rich_jaccard <- bind_rows(list(rich_series, jaccard_df))
+rich_jaccard <- spread(rich_jaccard, measure, value)
+
+g <- ggplot(rich_jaccard, aes(x = age, y = richness, color = jaccard)) +
+  stat_smooth(formula = 'y ~ x', method = 'lm', linetype='dashed', color='black') +
+  geom_point(size=5) +
+  scale_x_reverse() +
+  xlab('Age (Million Years Ago)') +
+  ylab('S') +
+  scale_color_viridis_c(option = "inferno") +
+  theme_classic()
+g
+```
+
+So we have an overall downward trend [can i get a p-value for this?] the jaccard similarity seems to be lowest following large losses in species richness.
+
+## Bray-Curtis (coarse-grained)
+
+### Dendrogram of sites and species
+We can also produce plots using the coarse-grained family level data. We'll start with that dense as hell dendrogram heatmap thing
+
+```{r}
+# load the data
+taxa <- readr::read_csv("../data/layer_by_percent.csv")
+
+nice_labels <- c("Bed I (low)", "Bed I (mid)", "Bed I (high)", "Bed II (low)", 
+                 "Bed II (mid)", "Bed II (high)", "Bed III", "Bed IV (low)", 
+                 "Bed IV (mid)", "Bed IV (high)", "Masek")
+
+# exclude layer at age_ma cols
+taxa_mat <- as.matrix(select(taxa, -layer, -age_ma))
+png('test.png', height = 800, width = 1600)
+gplots::heatmap.2(taxa_mat, distfun = function(x) vegan::vegdist(x), 
+                  hclustfun = function(x) hclust(x, method="ward.D2"),
+                  col = inferno, trace = "none", density.info = "none", dendrogram = "column",
+                  labRow = nice_labels, margins=c(20, 16), cexRow=3, cexCol=3)
+graphics.off()
+print(colSums(taxa_mat))
+```
+
+eh. not really an interesting and clear signal here other than some families are dominant. Bovidae is almost always a plurality in these sites.
+
+### Ordination
+
+We'll start with a simple PCoA before trying to get more complicated by adding environmental data.
+
+```{r}
+# do the scaling
+taxa_bc <- vegan::vegdist(taxa_mat)
+taxa_pcoa <- cmdscale(taxa_bc, eig = TRUE, k = 3)
+
+# calculate explained variances
+taxa_expvar <- round(sapply(taxa_pcoa$eig, function(x) x / sum(taxa_pcoa$eig)), 3)
+
+# convert to dataframe and add some nice labels
+pcoa_df <- tibble::as_tibble(taxa_pcoa$points)
+nice_labels <- c("Bed I (low)", "Bed I (mid)", "Bed I (high)", "Bed II (low)", 
+                 "Bed II (mid)", "Bed II (high)", "Bed III", "Bed IV (low)", 
+                 "Bed IV (mid)", "Bed IV (high)", "Masek")
+plot_pcoa <- pcoa_df %>%
+  mutate(layer = nice_labels) %>%
+  mutate(age = taxa$age_ma)
+g <- ggplot(plot_pcoa, aes(x = V1, y = V2, col = age)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "grey") +
+  geom_vline(xintercept = 0, linetype = 2, color = "grey") +
+  geom_point(size = 5) +
+  geom_text(aes(x = V1, y = V2 + 0.02, label = layer), color = "black") +
+  scale_color_continuous(type = "viridis") +
+  xlim(-0.45, 0.3) +
+  ylim(-0.2, 0.3) +
+  xlab(paste("PCoA 1 (", taxa_expvar[1]*100, "%)", sep="")) +
+  ylab(paste("PCoA 2 (", taxa_expvar[2]*100, "%)", sep="")) +
+  theme_classic()
+
+g
+```
+
+It looks like we can sort of see separation between the layers with the middle time period sort of clustering in the bottom right.
+
