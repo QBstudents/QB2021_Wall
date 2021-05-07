@@ -1,0 +1,216 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Incorporating Environmental Data
+
+```{r}
+require(tidyr)
+require(dplyr)
+require(ggplot2)
+
+# load taxa and environment data
+taxa <- readr::read_csv("../data/layer_by_percent.csv")
+env <- readr::read_csv("../data/totalenv.csv")
+layers <- readr::read_csv("../data/unitages.csv")
+print(env)
+```
+
+# The environmental time series
+
+```{r}
+# make the dataframe ggplot friendly
+long_env <- tidyr::pivot_longer(env, c(carb_c13, carb_o18), names_to = "key", values_to = "value")
+g <- ggplot(long_env, aes(x = age_ma, y = value, col = key)) +
+  geom_line() +
+  geom_vline(data = layers, aes(xintercept = age_ma), linetype = 2) +
+  scale_x_reverse()
+g
+```
+
+These look super correlated. Maybe we should look at that directly
+
+```{r}
+g <- ggplot(env, aes(x = carb_c13, y = carb_o18)) +
+  geom_point()
+g
+cor.test(env$carb_c13, env$carb_o18)
+```
+
+We need to figure out the right way to bin these environmental measurements for making our calculations. The simplest would be just using the times inbetween the times linked to our layers. does this give us consistent numbers of time points though?
+
+```{r}
+print(layers)
+for (i in 1:nrow(layers)) {
+  if (i == 1) {
+    print(nrow(env[which(env$age_ma > layers$age_ma[1]),]))
+  } else {
+    print(nrow(env[which((env$age_ma >= layers$age_ma[i]) & (env$age_ma < layers$age_ma[i-1])),]))
+  }
+}
+```
+
+# what happens if we try and interpolate
+
+```{r}
+# calculate the interpolation
+num_points <- 100
+inter_car <- approx(env$age_ma, env$carb_c13, n = num_points)
+inter_oxy <- approx(env$age_ma, env$carb_o18, n = num_points)
+print(inter_car$x == inter_oxy$x)
+
+# reshape the time series into long format data frames
+inter_df <- tibble::tibble(age_ma = inter_car$x) %>%
+  mutate(c13 = inter_car$y) %>%
+  mutate(o18 = inter_oxy$y) %>%
+  pivot_longer(c(c13, o18), names_to = "key", values_to = "value")
+
+# plot
+g <- ggplot(inter_df, aes(x = age_ma, y = value, col = key)) +
+  geom_vline(data = layers, aes(xintercept = age_ma), linetype=2) +
+  geom_line() +
+  geom_smooth(method = 'lm') +
+  geom_point() +
+  scale_x_reverse() +
+  xlab("Age (Ma)") +
+  ylab("Fancy Isopope Measurement") +
+  scale_color_manual(values=c("seagreen", "orchid2")) +
+  theme_classic()
+g
+```
+
+Ok so we can adjust how finely we want to sample this but this is probably a fine approach to take. So now we'll just iterate over the layers and calculate the mean and standard deviation of the previous $n$ points. We might want to weigh more recent points more highly but we'll start with uniform weight.
+
+```{r}
+# number of points to use
+n_points <- 12
+time_per_point <- inter_car$x[2] - inter_car$x[1]
+print(n_points * time_per_point)
+
+# get the appropriate wide dataframe from the old long one
+inter_wide <- spread(inter_df, key = key, value = value)
+
+# empty columns
+mean_carbon <- c(length = nrow(layers))
+sd_carbon <- c(length = nrow(layers))
+mean_oxygen <- c(length = nrow(layers))
+sd_oxygen <- c(length = nrow(layers))
+
+for (i in 1:nrow(layers)) {
+  # because the times dont exactly match between the layers and the interpolation
+  time_window <- which(inter_wide$age_ma > layers$age_ma[i] & inter_wide$age_ma <= layers$age_ma[i] + n_points * time_per_point)
+  env_window <- inter_wide[time_window,]
+  
+  # we might want to weigh these at some point
+  #weight_vec <- n_points:1 / sum(n_points:1)
+  weight_vec <- c(rep(1 / n_points, n_points)) # simple uniform weights
+  print(env_window$c13)
+  
+  # use this data to get the columns
+  mean_carbon[i] <- Hmisc::wtd.mean(env_window$c13, weight_vec)
+  mean_oxygen[i] <- Hmisc::wtd.mean(env_window$o18, weight_vec)
+  
+  sd_carbon[i] <- sqrt(Hmisc::wtd.var(env_window$c13, weight_vec, normwt=TRUE))
+  sd_oxygen[i] <- sqrt(Hmisc::wtd.var(env_window$o18, weight_vec, normwt=TRUE))
+}
+layers_env <- layers %>%
+  mutate(mean_c13 = mean_carbon) %>%
+  mutate(mean_o18 = mean_oxygen) %>%
+  mutate(sd_c13 = sd_carbon) %>%
+  mutate(sd_o18 = sd_oxygen)
+print(layers_env)
+```
+
+Ok now that we have these calculated let's try a constrained ordination
+
+```{r}
+require(readr)
+require(vegan)
+require(purrr)
+require(viridis)
+
+# abundance data
+taxa <- read_csv('~/projects/QB-2021-project/data/layer_by_percent.csv')
+labels <- as_vector(taxa['layer'])
+ages <- as_vector(taxa['age_ma'])
+abundance_bc <- vegan::vegdist(taxa[, 2:(ncol(taxa)-1)])
+
+# get the environment matrix
+env_mat <- layers_env[, 3:ncol(layers_env)]
+
+# model selection
+# no vars
+taxa_dbrda_none <- vegan::dbrda(abundance_bc ~ 1, env_mat)
+# all vars
+taxa_dbrda_full <- vegan::dbrda(abundance_bc ~ ., env_mat)
+# test fits
+taxa_dbrda <- vegan::ordistep(taxa_dbrda_none, taxa_dbrda_full, perm_max = 200)
+taxa_dbrda <- vegan::dbrda(abundance_bc ~ sd_o18 + mean_o18, env_mat)
+
+## check it out!
+print(taxa_dbrda$anova)
+
+# none of the env vectors matter but lets plot the whole thing anyway
+vegan::ordiplot(taxa_dbrda_full)
+
+# Let's make a fancy plot
+expvar <- round(sapply(taxa_dbrda$CCA$eig, function(x) x /
+                       sum(c(taxa_dbrda$CCA$eig))), 3) * 100
+
+print(expvar)
+vegan::ordiplot(taxa_dbrda)
+# convert the plots to a dataframe
+dbrda_tib <- tibble::as_tibble(scores(taxa_dbrda)$sites) %>% 
+  mutate(layer = labels) %>%
+  mutate(age_ma = ages)
+
+env_vecs <- tibble::as_tibble(scores(taxa_dbrda, display = "bp"))
+env_vecs <- mutate(env_vecs, name = c("S.D. O18", "Mean O18")) # c('Oxygen', 'Demand', 'Nitrate'))
+
+print(env_vecs)
+g <- ggplot() +
+  geom_hline(yintercept=0, linetype=3, color='black') +
+  geom_vline(xintercept = 0, linetype=3, color='black') +
+  geom_point(data=dbrda_tib, aes(x = dbRDA1, y = dbRDA2, col=age_ma), size = 7, alpha = 0.8) +
+  #geom_text(data=dbrda_tib, aes(x = dbRDA1, y = dbRDA2, label = layer)) +
+  geom_segment(data=env_vecs, aes(x = 0, y = 0, xend = dbRDA1, yend = dbRDA2), arrow = arrow(), color = 'orchid2') +
+  geom_text(data=env_vecs, aes(x = dbRDA1 - c(0.205, 0.15), y = dbRDA2 + 0.1, label = name)) +
+  xlab(paste('dbRDA 1 (', expvar[1], '%)', sep = '')) +
+  ylab(paste('dbRDA 2 (', expvar[2], '%)', sep = '')) +
+  scale_color_continuous(type = 'viridis') +
+  theme_classic()
+g
+```
+
+not exactly sure how to get the stats on this. 
+
+```{r}
+print(env_vecs)
+vegan::permutest(taxa_dbrda)
+vegan::envfit(taxa_dbrda, env_mat)
+```
+
+Standard deviation explains a great deal of the variation and both are statistically significant.
+
+```{r}
+names(taxa)
+taxa_high <- taxa %>%
+  select(-layer, -age_ma) %>%
+  select_if(~any(. > 10)) %>%
+  mutate(layer = taxa$layer) %>%
+  mutate(age_ma = taxa$age_ma) %>%
+  merge(layers_env) %>%
+  select(-mean_c13, -sd_c13) %>%
+  pivot_longer(cols = !c(mean_o18, sd_o18, layer, age_ma), 
+               names_to = "family", 
+               values_to = "percent")
+
+sd_oplot <- ggplot(taxa_high, aes(x = sd_o18, y=percent, color=family)) +
+  geom_point() +
+  geom_line() +
+  xlab(paste("Standard Deviation O18", sep = " ")) +
+  ylab("Abundance (%)") +
+  theme_classic()
+sd_oplot
+```
